@@ -41,8 +41,11 @@ DEFAULT_BASE_URL = (
     "https://ws-leyp0n1kyjsllxss.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
 )
 DEFAULT_MODEL = "text-embedding-v2"
+DEFAULT_DOCUMENT = Path(__file__).resolve().parent / "qa_test_20.md"
 DEFAULT_CHROMA_PATH = Path(__file__).resolve().parent / "qa_chroma_db"
 DEFAULT_COLLECTION_NAME = "qa-demo"
+DEFAULT_BATCH_SIZE = 4
+DEFAULT_TIMEOUT = 60.0
 
 DEFAULT_PAIRS = [
     ("如何提高知识库检索准确率？", "可以优化问答质量、向量模型、召回数量和重排序策略。"),
@@ -178,7 +181,7 @@ def _flush_heading_answer(
 
 
 def parse_markdown(path: Path) -> list[QAPair]:
-    """把 Markdown 标题作为问题，其下正文作为答案。"""
+    """按 qa.py 的 Markdown 规则，用标题路径作为问题、标题下正文作为答案。"""
     lines = _decode(path.read_bytes()).splitlines()
     pairs: list[QAPair] = []
     question_stack: list[str] = []
@@ -191,8 +194,11 @@ def parse_markdown(path: Path) -> list[QAPair]:
         if line.strip().startswith("```"):
             in_code_block = not in_code_block
 
-        heading = None if in_code_block else re.match(r"^(#{1,6})\s*(.+?)\s*$", line)
-        if not heading:
+        # 与 qa.py 的 mdQuestionLevel 一致：统计行首 # 数量并去掉标题标记。
+        heading_match = re.match(r"#*", line) if not in_code_block else None
+        level = len(heading_match.group(0)) if heading_match else 0
+        question = line.lstrip("#").lstrip() if level else ""
+        if not level or level > 6:
             if question_stack:
                 answer_lines.append(line)
             continue
@@ -201,8 +207,6 @@ def parse_markdown(path: Path) -> list[QAPair]:
         answer_lines = []
         answer_position = line_number
 
-        level = len(heading.group(1))
-        question = heading.group(2).strip()
         while level_stack and level <= level_stack[-1]:
             level_stack.pop()
             question_stack.pop()
@@ -546,38 +550,23 @@ class QAChromaStore:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("document", nargs="?", type=Path, help="待解析的 Q&A 文档")
+    parser.add_argument(
+        "document",
+        nargs="?",
+        type=Path,
+        default=DEFAULT_DOCUMENT,
+        help=f"待解析的 Markdown 文件，默认：{DEFAULT_DOCUMENT.name}",
+    )
     parser.add_argument("--query", default="如何提高知识库检索准确率？")
-    parser.add_argument("--top-k", type=int, default=3)
     parser.add_argument(
         "--pairs-only",
         action="store_true",
         help="只解析并显示问答，不调用向量接口，也不写入 Chroma",
     )
     parser.add_argument(
-        "--english",
-        action="store_true",
-        help="保存时使用 Question/Answer 前缀，默认使用问题/回答前缀",
-    )
-    parser.add_argument(
         "--api-key",
         default=os.getenv("DASHSCOPE_API_KEY") or os.getenv("QWEN_API_KEY"),
         help="默认读取 DASHSCOPE_API_KEY 或 QWEN_API_KEY",
-    )
-    parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
-    parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--batch-size", type=int, default=4)
-    parser.add_argument("--timeout", type=float, default=60.0)
-    parser.add_argument(
-        "--chroma-path",
-        type=Path,
-        default=DEFAULT_CHROMA_PATH,
-        help=f"Chroma 持久化目录，默认：{DEFAULT_CHROMA_PATH}",
-    )
-    parser.add_argument(
-        "--collection-name",
-        default=DEFAULT_COLLECTION_NAME,
-        help=f"Chroma collection 名称，默认：{DEFAULT_COLLECTION_NAME}",
     )
     return parser.parse_args()
 
@@ -613,35 +602,35 @@ def main() -> int:
         )
         return 2
 
-    documents = [pair.document(english=args.english) for pair in pairs]
+    documents = [pair.document() for pair in pairs]
     client = QwenEmbeddingClient(
         api_key=api_key,
-        base_url=args.base_url,
-        model=args.model,
-        batch_size=args.batch_size,
-        timeout=args.timeout,
+        base_url=DEFAULT_BASE_URL,
+        model=DEFAULT_MODEL,
+        batch_size=DEFAULT_BATCH_SIZE,
+        timeout=DEFAULT_TIMEOUT,
     )
 
     try:
         vectors, document_tokens = client.encode(documents)
         query_vector, query_tokens = client.encode_query(args.query)
-        source = str(args.document.expanduser().resolve()) if args.document else document_name
-        store = QAChromaStore(args.chroma_path, args.collection_name)
+        source = str(args.document.expanduser().resolve())
+        store = QAChromaStore(DEFAULT_CHROMA_PATH, DEFAULT_COLLECTION_NAME)
         stored_ids = store.save(
             source,
             source_format,
             pairs,
             documents,
             vectors,
-            args.model,
+            DEFAULT_MODEL,
         )
-        ranked = store.query(query_vector, args.top_k)
+        ranked = store.query(query_vector, top_k=3)
     except (DemoError, ValueError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
     print("\n=== Chroma QA retrieval ===")
-    print(f"model: {args.model}")
+    print(f"model: {DEFAULT_MODEL}")
     print(f"endpoint: {client.url}")
     print(f"embedding dimension: {len(query_vector)}")
     print(f"provider token usage: document={document_tokens}, query={query_tokens}")
