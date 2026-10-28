@@ -37,22 +37,13 @@ DEFAULT_BASE_URL = (
     "compatible-mode/v1"
 )
 DEFAULT_MODEL = "text-embedding-v2"
+# 默认解析脚本同目录下的测试文件；也可以在命令行传入其他文档覆盖它。
+DEFAULT_DOCUMENT = Path(__file__).resolve().parent / "naive_test.md"
 # Chroma 默认保存在 demo 文件同级目录，避免因运行时工作目录不同而找不到数据库。
 DEFAULT_CHROMA_PATH = Path(__file__).resolve().parent / "chroma_db"
 DEFAULT_COLLECTION_NAME = "naive-demo"
 # 与 rag/app/naive.py 的默认分隔符保持一致，包含换行和中英文句末符号。
 DEFAULT_DELIMITER = "\n!?;。；！？"
-# 未传入文档路径时使用这段内置文本，方便直接运行脚本验证完整流程。
-DEFAULT_SAMPLE = """# 企业知识库检索
-
-RAG 系统通常先将文档解析并切分为较小的文本块，然后计算每个文本块的向量。
-合理的块大小能够保留上下文，同时减少无关内容对相似度的干扰。
-
-用户提问时，系统使用相同的向量模型生成查询向量，并通过余弦相似度召回相关文本块。
-召回数量、文本切分策略、向量模型和重排序模型都会影响最终回答的准确率。
-
-结构化数据库索引适合精确查询，但不能直接替代语义向量检索。
-"""
 
 
 class DemoError(RuntimeError):
@@ -266,9 +257,9 @@ def _pdf_text(path: Path) -> str:
 
 def read_sections(path: Path | None) -> tuple[str, list[str]]:
     """根据文件扩展名读取文档，并返回文档名与有序文本段落。"""
-    # 不传文件时使用内置示例，使脚本开箱即可测试。
+    # 不传文件时读取代码中指定的外部测试文件，不把测试正文写进脚本。
     if path is None:
-        return "built-in-sample.md", [DEFAULT_SAMPLE]
+        path = DEFAULT_DOCUMENT
     if not path.is_file():
         raise DemoError(f"Document does not exist: {path}")
 
@@ -514,7 +505,13 @@ class ChromaVectorStore:
 def parse_args() -> argparse.Namespace:
     """定义命令行参数。"""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("document", nargs="?", type=Path, help="Document to parse")
+    parser.add_argument(
+        "document",
+        nargs="?",
+        type=Path,
+        default=DEFAULT_DOCUMENT,
+        help=f"Document to parse (default: {DEFAULT_DOCUMENT.name})",
+    )
     parser.add_argument("--query", default="什么因素会影响知识库检索准确率？")
     parser.add_argument("--chunk-size", type=int, default=128)
     parser.add_argument("--overlap", type=float, default=10.0, help="Overlap percentage")
