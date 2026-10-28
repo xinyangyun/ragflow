@@ -43,21 +43,11 @@ from urllib.request import Request, urlopen
 
 DEFAULT_BASE_URL = "https://ws-leyp0n1kyjsllxss.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
 DEFAULT_MODEL = "text-embedding-v2"
+# 默认解析脚本同目录下的测试书籍；命令行传入其他文档时会覆盖该路径。
+DEFAULT_DOCUMENT = Path(__file__).resolve().parent / "book_test.md"
 DEFAULT_CHROMA_PATH = Path(__file__).resolve().parent / "book_chroma_db"
 DEFAULT_COLLECTION_NAME = "book-demo"
 DEFAULT_DELIMITER = "\n!?。；！？"
-DEFAULT_SAMPLE = """第一章 知识库基础
-第一节 文档处理
-书籍先被解析成有序文本段，再根据章节标题组织检索分块。
-有章节编号时，每段正文会附带其上级标题，避免检索结果失去上下文。
-第二节 向量检索
-文档块和用户问题使用同一个向量模型编码，再按语义相似度检索。
-第二章 检索优化
-第一节 数据质量
-清理重复内容、去掉目录，并保留完整章节语义，可以减少无关内容。
-第二节 召回策略
-合理设置召回数量，并增加重排序步骤，有助于提高检索准确率。
-"""
 
 # 这五组规则来自 rag/nlp/__init__.py 的 BULLET_PATTERN，组内顺序表示层级。
 BULLET_PATTERN = [
@@ -149,7 +139,7 @@ def read_sections(path: Path | None, from_page: int = 1, to_page: int | None = N
     if from_page < 1 or (to_page is not None and to_page < from_page):
         raise DemoError("页码必须从 1 开始，且结束页不得小于起始页")
     if path is None:
-        return "built-in-book.txt", [(line.strip(), "") for line in DEFAULT_SAMPLE.splitlines() if line.strip()]
+        path = DEFAULT_DOCUMENT
     path = path.expanduser()
     if not path.is_file():
         raise DemoError(f"文件不存在：{path}")
@@ -197,7 +187,6 @@ def read_sections(path: Path | None, from_page: int = 1, to_page: int | None = N
             parser.feed(text)
             parser.close()
             text = "".join(parser.parts)
-        breakpoint()
     else:
         raise DemoError(f"不支持 {suffix or '无扩展名'}，请使用 TXT、Markdown、HTML、PDF 或 DOCX；旧版 DOC 请先转为 DOCX")
     return path.name, [(line.strip(), "") for line in text.splitlines() if line.strip()]
@@ -441,7 +430,13 @@ class BookChromaStore:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("document", nargs="?", type=Path, help="书籍路径；不传则读取内置示例")
+    parser.add_argument(
+        "document",
+        nargs="?",
+        type=Path,
+        default=DEFAULT_DOCUMENT,
+        help=f"书籍路径；默认读取：{DEFAULT_DOCUMENT.name}",
+    )
     parser.add_argument("--chunks-only", action="store_true", help="只打印分块，不调用 API 或写入 Chroma")
     parser.add_argument("--chunk-size", type=int, default=512, help="仅无章节结构时生效；0 表示整篇合并")
     parser.add_argument("--delimiter", default=DEFAULT_DELIMITER, help="无章节结构时使用的分隔符，支持反引号包裹的自定义分隔符")
@@ -484,8 +479,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n--- chunk {index} ({token_count(text)} estimated tokens) ---\n{text}")
     if args.chunks_only:
         return 0
-    # api_key = args.api_key
-    api_key = "sk-ws-H.PPYPYHY.mejn.MEQCICtT0AUBQ5D-G7PWYTCiKuh61Bycb-SSLxq-Wpn1T6v-AiBmwk6Wr5EXpaC_PPdtohngD0uhaP15cxdpLQ4cw1mA1A"
+    api_key = args.api_key
     if not api_key and sys.stdin.isatty():
         api_key = getpass.getpass("Qwen API key: ")
     if not api_key or not api_key.strip():

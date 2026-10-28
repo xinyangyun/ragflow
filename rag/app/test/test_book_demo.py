@@ -47,7 +47,8 @@ class BookChunkTests(unittest.TestCase):
         functions = ast.Module(body=[node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name in names], type_ignores=[])
         scope = {"re": demo.re, "logging": logging, "BULLET_PATTERN": demo.BULLET_PATTERN, "num_tokens_from_string": demo.token_count}
         exec(compile(functions, str(upstream), "exec"), scope)
-        for source in (demo.DEFAULT_SAMPLE, "# 手册\n## 基础\n正文内容。\n## 实践\n实践内容。", "开篇说明\n第一章 基础\n（一）定义\n术语正文\n第二章 实践\n更多正文"):
+        default_source = demo.DEFAULT_DOCUMENT.read_text(encoding="utf-8")
+        for source in (default_source, "# 手册\n## 基础\n正文内容。\n## 实践\n实践内容。", "开篇说明\n第一章 基础\n（一）定义\n术语正文\n第二章 实践\n更多正文"):
             sections = [(line, "") for line in source.splitlines() if line]
             category = demo.bullets_category(sections)
             expected = ["\n".join(chunk) for chunk in scope["hierarchical_merge"](category, sections, 5) if chunk]
@@ -109,6 +110,7 @@ class BookChunkTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             script = Path(folder) / "book_demo.py"
             shutil.copyfile(demo.__file__, script)
+            shutil.copyfile(demo.DEFAULT_DOCUMENT, Path(folder) / demo.DEFAULT_DOCUMENT.name)
             result = subprocess.run([sys.executable, "-I", str(script), "--chunks-only"], cwd=folder, capture_output=True, text=True, timeout=20)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("hierarchical_merge", result.stdout)
@@ -172,7 +174,7 @@ class ChromaTests(unittest.TestCase):
                 status = demo.main(["--api-key", "test-key", "--chroma-path", folder])
             self.assertEqual(status, 0)
             self.assertIn("=== vector retrieval ===", output.getvalue())
-            self.assertIn("stored chunks: 5", output.getvalue())
+            self.assertIn("stored chunks: 13", output.getvalue())
 
 
 if __name__ == "__main__":
